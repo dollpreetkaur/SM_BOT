@@ -8,30 +8,30 @@ model = joblib.load(MODEL_PATH)
 
 def predict_bot(stats):
     """
-    Input: Dictionary of raw stats from the scraper (or demo fallback)
+    Input: Can be a dictionary OR a list
     Output: Probability (0.0 to 1.0)
     """
-    
-    # 1. Feature Engineering (MATCHING YOUR 6-COLUMN MODEL)
-    # We remove 'velocity' and 'reputation' because the model doesn't recognize them.
-    
-    age = float(stats.get('age_days', 365)) 
-    
-    features = [
-        np.log1p(float(stats.get('followers_count', 0))),
-        np.log1p(float(stats.get('statuses_count', 0))),
-        np.log1p(float(stats.get('friends_count', 0))),
-        np.log1p(float(stats.get('favourites_count', 0))),
-        np.log1p(float(stats.get('listed_count', 0))),
-        age
-    ]
+    # 1. Handle Input Type
+    if isinstance(stats, dict):
+        # If it's a dictionary (raw data), extract the 6 features
+        features = [
+            np.log1p(float(stats.get('followers_count', 0))),
+            np.log1p(float(stats.get('statuses_count', 0))),
+            np.log1p(float(stats.get('friends_count', 0))),
+            np.log1p(float(stats.get('favourites_count', 0))),
+            np.log1p(float(stats.get('listed_count', 0))),
+            float(stats.get('age_days', 365))
+        ]
+    elif isinstance(stats, list):
+        # If it's already a list, just use it (but ensure it's only the first 6)
+        features = stats[:6]
+    else:
+        raise ValueError("Stats must be a list or a dictionary")
 
     # 2. Inference
-    # Now passing exactly 6 columns in a 2D array shape
     try:
         prob = model.predict_proba([features])[0][1]
         return float(prob)
     except Exception as e:
         print(f"Inference Error: {e}")
-        # If it still fails, check if the model is a regressor or classifier
         return 0.0
