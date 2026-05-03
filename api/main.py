@@ -12,7 +12,6 @@ from src.explain import get_explanation
 
 app = FastAPI(title="Advanced Bot Detection API")
 
-# List of backup Nitter instances
 NITTER_INSTANCES = [
     'https://nitter.poast.org', 
     'https://nitter.privacydev.net', 
@@ -26,26 +25,21 @@ def home():
 @app.get("/analyze/{username}")
 async def analyze(username: str):
     try:
-        # Initialize scraper
         scraper = Nitter(instances=NITTER_INSTANCES)
         
         profile = None
         try:
-            # Wrap the scraper call to catch library-level failures
             profile = scraper.get_profile_info(username)
-        except Exception as e:
-            print(f"Scraper internal error: {e}")
+        except Exception:
             profile = None
 
-        # --- ROBUST FALLBACK LOGIC (Demo Mode) ---
+        # --- FALLBACK LOGIC ---
         user_lower = username.lower().replace('@', '')
         stats = None
 
-        # Check if profile is a dictionary and has the 'stats' key
         if isinstance(profile, dict) and 'stats' in profile and profile['stats']:
             stats = profile['stats']
         else:
-            # If scraper failed/blocked, check for Demo Accounts
             if user_lower == "elonmusk":
                 stats = {'followers': 185000000, 'tweets': 45000, 'following': 600, 'likes': 25000}
             elif user_lower == "nasa":
@@ -55,45 +49,41 @@ async def analyze(username: str):
             elif user_lower == "bot_tester":
                 stats = {'followers': 2, 'tweets': 8000, 'following': 4500, 'likes': 1}
         
-        # If no stats found (not a demo account and scraper failed)
         if not stats:
             return {
                 "username": username,
                 "bot_probability": "0.00%",
                 "verdict": "Unknown",
-                "top_reasons": ["X/Nitter instances are currently overloaded. Try 'elonmusk' or 'bot_tester' for demo."]
+                "top_reasons": ["Nitter is currently blocked. Use 'bot_tester' for demo."]
             }
 
-        # --- DATA PREPARATION ---
-        raw_data = {
-            'followers_count': stats.get('followers', 0),
-            'statuses_count': stats.get('tweets', 0),
-            'friends_count': stats.get('following', 0),
-            'favourites_count': stats.get('likes', 0),
-            'listed_count': 0, 
-            'age_days': 365 
-        }
-
-        # Calculate score using your Neural Network
-        score = predict_bot(raw_data)
-        
-        # Feature list for SHAP explanations
-        activity_rate = raw_data['statuses_count'] / max(raw_data['age_days'], 1)
-        follower_ratio = raw_data['followers_count'] / (raw_data['followers_count'] + raw_data['friends_count'] + 1)
-
-        feature_list = [
-            np.log1p(raw_data['followers_count']), 
-            np.log1p(raw_data['statuses_count']),
-            np.log1p(raw_data['friends_count']), 
-            np.log1p(raw_data['favourites_count']),
-            np.log1p(raw_data['listed_count']), 
-            float(raw_data['age_days']),
-            float(activity_rate),
-            float(follower_ratio)
+        # --- THE FIX: FEATURE SYNCING ---
+        # 1. The 6 Features your Model was trained on
+        model_input = [
+            np.log1p(stats.get('followers', 0)), 
+            np.log1p(stats.get('tweets', 0)),
+            np.log1p(stats.get('following', 0)), 
+            np.log1p(stats.get('likes', 0)),
+            0.0, # listed_count
+            365.0 # age_days
         ]
+
+        # Get score using only the 6 required features
+        score = predict_bot(model_input)
         
-        # Get AI explanation
-        reasons = get_explanation(feature_list)
+        # 2. Add extra features for the EXPLANATION only
+        # We only pass these if your get_explanation function expects 8. 
+        # If get_explanation ALSO crashes, change 'shap_input' to just 'model_input'.
+        activity_rate = stats.get('tweets', 0) / 365.0
+        follower_ratio = stats.get('followers', 0) / (stats.get('followers', 0) + stats.get('following', 0) + 1)
+
+        shap_input = model_input + [float(activity_rate), float(follower_ratio)]
+        
+        try:
+            reasons = get_explanation(shap_input)
+        except:
+            # Fallback if explanation logic also expects 6
+            reasons = get_explanation(model_input)
 
         return {
             "username": username,
@@ -103,10 +93,9 @@ async def analyze(username: str):
         }
 
     except Exception as e:
-        # Final catch-all to prevent 500 errors
         return {
             "username": username,
             "bot_probability": "0.00%",
             "verdict": "System Error",
-            "top_reasons": [f"Error Details: {str(e)}"]
+            "top_reasons": [f"Error: {str(e)}"]
         }
