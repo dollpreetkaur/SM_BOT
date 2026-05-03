@@ -12,6 +12,7 @@ from src.explain import get_explanation
 
 app = FastAPI(title="Advanced Bot Detection API")
 
+# List of backup Nitter instances
 NITTER_INSTANCES = [
     'https://nitter.poast.org', 
     'https://nitter.privacydev.net', 
@@ -25,18 +26,26 @@ def home():
 @app.get("/analyze/{username}")
 async def analyze(username: str):
     try:
+        # Initialize scraper
         scraper = Nitter(instances=NITTER_INSTANCES)
         
-        # 1. Attempt to scrape
+        profile = None
         try:
+            # Wrap the scraper call to catch library-level failures
             profile = scraper.get_profile_info(username)
-        except Exception:
+        except Exception as e:
+            print(f"Scraper internal error: {e}")
             profile = None
 
-        # 2. FALLBACK LOGIC (Demo Mode)
-        if not profile or 'stats' not in profile:
-            user_lower = username.lower().replace('@', '')
-            
+        # --- ROBUST FALLBACK LOGIC (Demo Mode) ---
+        user_lower = username.lower().replace('@', '')
+        stats = None
+
+        # Check if profile is a dictionary and has the 'stats' key
+        if isinstance(profile, dict) and 'stats' in profile and profile['stats']:
+            stats = profile['stats']
+        else:
+            # If scraper failed/blocked, check for Demo Accounts
             if user_lower == "elonmusk":
                 stats = {'followers': 185000000, 'tweets': 45000, 'following': 600, 'likes': 25000}
             elif user_lower == "nasa":
@@ -45,18 +54,17 @@ async def analyze(username: str):
                 stats = {'followers': 500000, 'tweets': 150000, 'following': 10, 'likes': 50}
             elif user_lower == "bot_tester":
                 stats = {'followers': 2, 'tweets': 8000, 'following': 4500, 'likes': 1}
-            else:
-                # If it's not a demo account and scraper fails, return "Unknown"
-                return {
-                    "username": username,
-                    "bot_probability": "0.00%",
-                    "verdict": "Unknown",
-                    "top_reasons": ["Scraper blocked by X. Try 'elonmusk' or 'hourly_shiba' for demo."]
-                }
-        else:
-            stats = profile['stats']
         
-        # 3. Process data for Model
+        # If no stats found (not a demo account and scraper failed)
+        if not stats:
+            return {
+                "username": username,
+                "bot_probability": "0.00%",
+                "verdict": "Unknown",
+                "top_reasons": ["X/Nitter instances are currently overloaded. Try 'elonmusk' or 'bot_tester' for demo."]
+            }
+
+        # --- DATA PREPARATION ---
         raw_data = {
             'followers_count': stats.get('followers', 0),
             'statuses_count': stats.get('tweets', 0),
@@ -66,9 +74,10 @@ async def analyze(username: str):
             'age_days': 365 
         }
 
+        # Calculate score using your Neural Network
         score = predict_bot(raw_data)
         
-        # 4. Feature list for SHAP
+        # Feature list for SHAP explanations
         activity_rate = raw_data['statuses_count'] / max(raw_data['age_days'], 1)
         follower_ratio = raw_data['followers_count'] / (raw_data['followers_count'] + raw_data['friends_count'] + 1)
 
@@ -83,6 +92,7 @@ async def analyze(username: str):
             float(follower_ratio)
         ]
         
+        # Get AI explanation
         reasons = get_explanation(feature_list)
 
         return {
@@ -93,4 +103,10 @@ async def analyze(username: str):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Final catch-all to prevent 500 errors
+        return {
+            "username": username,
+            "bot_probability": "0.00%",
+            "verdict": "System Error",
+            "top_reasons": [f"Error Details: {str(e)}"]
+        }
