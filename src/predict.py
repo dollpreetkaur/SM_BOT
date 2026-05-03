@@ -2,18 +2,16 @@ import numpy as np
 import joblib
 import os
 
-# Load model once to save memory
+# Load model
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models', 'model.pkl')
 model = joblib.load(MODEL_PATH)
 
 def predict_bot(stats):
     """
-    Input: Can be a dictionary OR a list
-    Output: Probability (0.0 to 1.0)
+    Hybrid Input: Works with Dict or List
     """
-    # 1. Handle Input Type
+    # If the API sent a dictionary
     if isinstance(stats, dict):
-        # If it's a dictionary (raw data), extract the 6 features
         features = [
             np.log1p(float(stats.get('followers_count', 0))),
             np.log1p(float(stats.get('statuses_count', 0))),
@@ -22,16 +20,16 @@ def predict_bot(stats):
             np.log1p(float(stats.get('listed_count', 0))),
             float(stats.get('age_days', 365))
         ]
+    # If the API sent a list by mistake
     elif isinstance(stats, list):
-        # If it's already a list, just use it (but ensure it's only the first 6)
-        features = stats[:6]
+        features = stats[:6] # Take only the first 6 items
     else:
-        raise ValueError("Stats must be a list or a dictionary")
+        return 0.0
 
-    # 2. Inference
+    # Inference
     try:
         prob = model.predict_proba([features])[0][1]
         return float(prob)
     except Exception as e:
-        print(f"Inference Error: {e}")
+        print(f"Model Error: {e}")
         return 0.0
