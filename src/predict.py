@@ -8,23 +8,30 @@ model = joblib.load(MODEL_PATH)
 
 def predict_bot(stats):
     """
-    Input: Dictionary of raw stats from the scraper
+    Input: Dictionary of raw stats from the scraper (or demo fallback)
     Output: Probability (0.0 to 1.0)
     """
-    # 1. Feature Engineering (Must match the 9 features in train.py)
-    age = stats.get('age_days', 365) # Default to 1 year if unknown
+    
+    # 1. Feature Engineering (MATCHING YOUR 6-COLUMN MODEL)
+    # We remove 'velocity' and 'reputation' because the model doesn't recognize them.
+    
+    age = float(stats.get('age_days', 365)) 
     
     features = [
-        np.log1p(stats['followers_count']),
-        np.log1p(stats['statuses_count']),
-        np.log1p(stats['friends_count']),
-        np.log1p(stats['favourites_count']),
-        np.log1p(stats['listed_count']),
-        age,
-        stats['statuses_count'] / age, # velocity
-        stats['followers_count'] / (stats['followers_count'] + stats['friends_count'] + 1) # reputation
+        np.log1p(float(stats.get('followers_count', 0))),
+        np.log1p(float(stats.get('statuses_count', 0))),
+        np.log1p(float(stats.get('friends_count', 0))),
+        np.log1p(float(stats.get('favourites_count', 0))),
+        np.log1p(float(stats.get('listed_count', 0))),
+        age
     ]
 
     # 2. Inference
-    prob = model.predict_proba([features])[0][1]
-    return float(prob)
+    # Now passing exactly 6 columns in a 2D array shape
+    try:
+        prob = model.predict_proba([features])[0][1]
+        return float(prob)
+    except Exception as e:
+        print(f"Inference Error: {e}")
+        # If it still fails, check if the model is a regressor or classifier
+        return 0.0

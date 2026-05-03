@@ -20,7 +20,7 @@ NITTER_INSTANCES = [
 
 @app.get("/")
 def home():
-    return {"message": "Bot Intelligence API is running! Use /analyze/{username} to test."}
+    return {"message": "Bot Intelligence API is running!"}
 
 @app.get("/analyze/{username}")
 async def analyze(username: str):
@@ -33,7 +33,7 @@ async def analyze(username: str):
         except Exception:
             profile = None
 
-        # --- FALLBACK LOGIC ---
+        # --- 1. FALLBACK LOGIC ---
         user_lower = username.lower().replace('@', '')
         stats = None
 
@@ -54,36 +54,36 @@ async def analyze(username: str):
                 "username": username,
                 "bot_probability": "0.00%",
                 "verdict": "Unknown",
-                "top_reasons": ["Nitter is currently blocked. Use 'bot_tester' for demo."]
+                "top_reasons": ["Nitter instances busy. Try 'bot_tester' for demo."]
             }
 
-        # --- THE FIX: FEATURE SYNCING ---
-        # 1. The 6 Features your Model was trained on
-        model_input = [
-            np.log1p(stats.get('followers', 0)), 
-            np.log1p(stats.get('tweets', 0)),
-            np.log1p(stats.get('following', 0)), 
-            np.log1p(stats.get('likes', 0)),
-            0.0, # listed_count
-            365.0 # age_days
+        # --- 2. DATA PREP (RAW DICTIONARY) ---
+        # We send this raw dictionary to predict_bot
+        raw_data = {
+            'followers_count': stats.get('followers', 0),
+            'statuses_count': stats.get('tweets', 0),
+            'friends_count': stats.get('following', 0),
+            'favourites_count': stats.get('likes', 0),
+            'listed_count': 0, 
+            'age_days': 365 
+        }
+
+        # --- 3. PREDICTION ---
+        # predict_bot now handles all the math/logging internally!
+        score = predict_bot(raw_data)
+        
+        # --- 4. EXPLANATION ---
+        # SHAP usually needs the processed list, so we recreate the 6 features here
+        feature_list = [
+            np.log1p(raw_data['followers_count']), 
+            np.log1p(raw_data['statuses_count']),
+            np.log1p(raw_data['friends_count']), 
+            np.log1p(raw_data['favourites_count']),
+            np.log1p(raw_data['listed_count']), 
+            float(raw_data['age_days'])
         ]
-
-        # Get score using only the 6 required features
-        score = predict_bot(model_input)
         
-        # 2. Add extra features for the EXPLANATION only
-        # We only pass these if your get_explanation function expects 8. 
-        # If get_explanation ALSO crashes, change 'shap_input' to just 'model_input'.
-        activity_rate = stats.get('tweets', 0) / 365.0
-        follower_ratio = stats.get('followers', 0) / (stats.get('followers', 0) + stats.get('following', 0) + 1)
-
-        shap_input = model_input + [float(activity_rate), float(follower_ratio)]
-        
-        try:
-            reasons = get_explanation(shap_input)
-        except:
-            # Fallback if explanation logic also expects 6
-            reasons = get_explanation(model_input)
+        reasons = get_explanation(feature_list)
 
         return {
             "username": username,
