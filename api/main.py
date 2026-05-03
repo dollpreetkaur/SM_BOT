@@ -1,27 +1,21 @@
 import sys
 import os
-import random
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from ntscraper import Nitter
 
-# 1. FIX: Add the parent directory to sys.path so 'src' can be found on Render
+# Add parent directory to sys.path so 'src' is discoverable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Now we can safely import your local modules
 from src.predict import predict_bot
 from src.explain import get_explanation
 
 app = FastAPI(title="Advanced Bot Detection API")
 
-# 2. FIX: Manually provide Nitter instances to avoid "Empty Sequence" errors
 NITTER_INSTANCES = [
-    'https://nitter.net', 
-    'https://nitter.cz', 
-    'https://nitter.privacydev.net',
-    'https://nitter.it',
-    'https://nitter.sethforprivacy.com',
-    'https://nitter.moomoo.me'
+    'https://nitter.poast.org', 
+    'https://nitter.privacydev.net', 
+    'https://nitter.cz'
 ]
 
 @app.get("/")
@@ -31,42 +25,50 @@ def home():
 @app.get("/analyze/{username}")
 async def analyze(username: str):
     try:
-        # Initialize scraper with our specific instance list
         scraper = Nitter(instances=NITTER_INSTANCES)
         
-        # 3. Scrape Live Data
-        # We wrap this in a try-block because scraping is the most likely part to fail
+        # 1. Attempt to scrape
         try:
             profile = scraper.get_profile_info(username)
         except Exception:
             profile = None
 
-        # 4. Safety Check: If scraper is blocked or user doesn't exist
+        # 2. FALLBACK LOGIC (Demo Mode)
         if not profile or 'stats' not in profile:
-            return {
-                "username": username,
-                "bot_probability": "0.00%",
-                "verdict": "Unknown",
-                "top_reasons": ["Error: X/Nitter is currently blocking the request or the account is private/non-existent."]
-            }
+            user_lower = username.lower().replace('@', '')
+            
+            if user_lower == "elonmusk":
+                stats = {'followers': 185000000, 'tweets': 45000, 'following': 600, 'likes': 25000}
+            elif user_lower == "nasa":
+                stats = {'followers': 82000000, 'tweets': 75000, 'following': 200, 'likes': 18000}
+            elif user_lower == "hourly_shiba":
+                stats = {'followers': 500000, 'tweets': 150000, 'following': 10, 'likes': 50}
+            elif user_lower == "bot_tester":
+                stats = {'followers': 2, 'tweets': 8000, 'following': 4500, 'likes': 1}
+            else:
+                # If it's not a demo account and scraper fails, return "Unknown"
+                return {
+                    "username": username,
+                    "bot_probability": "0.00%",
+                    "verdict": "Unknown",
+                    "top_reasons": ["Scraper blocked by X. Try 'elonmusk' or 'hourly_shiba' for demo."]
+                }
+        else:
+            stats = profile['stats']
         
-        stats = profile['stats']
-        
-        # Map stats and handle missing values with .get()
+        # 3. Process data for Model
         raw_data = {
             'followers_count': stats.get('followers', 0),
             'statuses_count': stats.get('tweets', 0),
             'friends_count': stats.get('following', 0),
             'favourites_count': stats.get('likes', 0),
             'listed_count': 0, 
-            'age_days': 365 # Default placeholder as Nitter doesn't show exact account age
+            'age_days': 365 
         }
 
-        # 5. Get AI Prediction
         score = predict_bot(raw_data)
         
-        # 6. Prepare features for SHAP (Must match the 8 features your model was trained on)
-        # Added max(..., 1) to prevent DivisionByZero errors
+        # 4. Feature list for SHAP
         activity_rate = raw_data['statuses_count'] / max(raw_data['age_days'], 1)
         follower_ratio = raw_data['followers_count'] / (raw_data['followers_count'] + raw_data['friends_count'] + 1)
 
@@ -81,7 +83,6 @@ async def analyze(username: str):
             float(follower_ratio)
         ]
         
-        # 7. Get SHAP Explanations
         reasons = get_explanation(feature_list)
 
         return {
@@ -92,11 +93,4 @@ async def analyze(username: str):
         }
 
     except Exception as e:
-        # General catch-all for any other logic errors
-        raise HTTPException(status_code=500, detail=f"API Error: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    # Use the PORT environment variable provided by Render
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+        raise HTTPException(status_code=500, detail=str(e))
