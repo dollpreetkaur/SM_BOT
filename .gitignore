@@ -1,0 +1,15 @@
+# Environments
+venv/
+.env
+
+# Data (Keep the clean version, ignore the raw ones)
+data/cresci-2017/
+*.csv
+!data/cresciclean.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# Models
+# (Optional: If model.pkl is >100MB, you'll need Git LFS, but it should be fine)
