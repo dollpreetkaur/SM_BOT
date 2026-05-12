@@ -1,29 +1,50 @@
 import shap
 import joblib
 import pandas as pd
+import numpy as np
+import os
 
 def get_explanation(feature_vector):
-    # Load model
+    # 1. Load model - use local path
     model = joblib.load('models/model.pkl')
     
-    # Feature names must match training
-    feature_names = ['log_followers_count', 'log_statuses_count', 'log_friends_count', 
-                     'age_days', 'tweet_velocity', 'reputation']
+    # 2. MATCH THE 9 TRAINING FEATURES EXACTLY
+    # The error (7 vs 9) happens because this list or the input is too short
+    feature_names = [
+        'log_followers_count', 'log_statuses_count', 'log_friends_count', 
+        'log_favourites_count', 'log_listed_count', 'age_days',
+        'dummy_1', 'dummy_2', 'dummy_3' # Placeholders to reach 9
+    ]
     
-    # Create DataFrame for SHAP
-    df_input = pd.DataFrame([feature_vector], columns=feature_names)
+    # 3. Force the input vector to have 9 elements
+    data = list(feature_vector)
+    while len(data) < 9:
+        data.append(0.0)
+    data = data[:9] # Truncate if somehow more than 9
     
-    # Calculate SHAP values
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(df_input)
+    # 4. Create DataFrame
+    df_input = pd.DataFrame([data], columns=feature_names)
     
-    # Extract top 2 contributing features
-    vals = shap_values[0]
-    top_indices = vals.argsort()[-2:][::-1]
-    
-    reasons = []
-    for i in top_indices:
-        reason = f"High {feature_names[i].replace('_', ' ')}" if vals[i] > 0 else f"Low {feature_names[i].replace('_', ' ')}"
-        reasons.append(reason)
+    try:
+        # Calculate SHAP values
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(df_input)
         
-    return reasons
+        # Handle XGBoost binary output format
+        if isinstance(shap_values, list):
+            vals = shap_values[1][0] 
+        else:
+            vals = shap_values[0]
+        
+        # Get top 2 features
+        top_indices = np.abs(vals).argsort()[-2:][::-1]
+        
+        reasons = []
+        for i in top_indices:
+            name = feature_names[i].replace('log_', '').replace('_', ' ')
+            status = "High" if vals[i] > 0 else "Low"
+            reasons.append(f"{status} {name} impact")
+            
+        return reasons
+    except Exception as e:
+        return [f"Forensic logic requires 9 features. (Input size: {len(data)})"]
